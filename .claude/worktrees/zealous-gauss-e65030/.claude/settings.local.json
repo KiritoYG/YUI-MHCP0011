@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep *)",
+      "Bash(find \"C:\\\\Users\\\\Kirito\\\\OneDrive\\\\桌面\\\\YUI-MHCP001\\\\.claude\\\\worktrees\\\\zealous-gauss-e65030\" -name \"*.py\" -type f -exec head -5 {} \\\\;)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(gh repo *)"
+    ]
+  }
+}

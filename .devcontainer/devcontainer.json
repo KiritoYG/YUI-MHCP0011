@@ -1,0 +1,25 @@
+{
+  "name": "YUI-MHCP001 Dev",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/app/.venv/bin/python"
+      },
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  },
+  "forwardPorts": [3456],
+  "portsAttributes": {
+    "3456": {
+      "label": "YUI-MHCP001 App",
+      "onAutoForward": "openBrowser" 
+    }
+  },
+  "postAttachCommand": "cd /app && .venv/bin/python server.py --host 0.0.0.0 --port 3456"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "Super Agent Party",
+  "short_name": "SAP",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4285f4",
+  "icons": [
+    {
+      "src": "source/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

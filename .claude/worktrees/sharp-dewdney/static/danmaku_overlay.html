@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>灵动悬浮弹幕</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&display=swap');
+        
+        body { 
+            margin: 0; 
+            padding: 0; 
+            /* 浅奶油色背景，非透明 */
+            background-color: #FAF9F6; 
+            overflow: hidden; 
+            font-family: 'Noto Sans SC', sans-serif; 
+        }
+
+        #danmaku-container {
+            position: absolute;
+            /* 激活时距离顶部 50px */
+            top: 50px; 
+            left: 50%;
+            
+            /* 初始状态：向上位移并缩小，带有轻微旋转 */
+            transform: translate(-50%, -250px) scale(0.5) rotate(-5deg);
+            transform-origin: center center;
+            
+            width: fit-content;
+            min-width: 480px;
+            max-width: 85vw;
+            
+            /* 马卡龙粉配色 */
+            background: #FFF0F5; 
+            color: #6D5D6E;
+            padding: 25px 50px;
+            
+            /* 完整的圆角矩形 */
+            border-radius: 40px; 
+            border: 6px solid #FFFFFF;
+            
+            /* 底部装饰条改为悬浮感阴影装饰 */
+            box-shadow: 
+                0 15px 0px #FFB7CE, /* 模拟厚度感 */
+                0 25px 50px rgba(255, 183, 206, 0.4);
+            
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            
+            /* 极具弹性的过渡曲线 */
+            transition: all 0.8s cubic-bezier(0.34, 1.7, 0.64, 1);
+            opacity: 0;
+            z-index: 999;
+            pointer-events: none;
+        }
+
+        /* 激活状态：弹入并恢复正常大小 */
+        #danmaku-container.show {
+            transform: translate(-50%, 0) scale(1) rotate(0deg);
+            opacity: 1;
+        }
+
+        /* 顶部小标签 */
+        .header-tag {
+            background: #FFB7CE;
+            color: white;
+            padding: 4px 18px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: 1px;
+            box-shadow: 0 3px 0 #ef9cb6;
+        }
+
+        .content {
+            font-size: 38px;
+            font-weight: 700;
+            line-height: 1.4;
+            text-align: center;
+            color: #5F5F5F;
+            /* 文字微小阴影增加立体感 */
+            text-shadow: 2px 2px 0px #FFFFFF;
+            word-break: break-all;
+            
+            /* 内部轻微呼吸动画 */
+            animation: floating-text 3s ease-in-out infinite;
+        }
+
+        @keyframes floating-text {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-3px); }
+        }
+
+        /* 这里的伪元素增加一点马卡龙可爱的装饰（可选） */
+        #danmaku-container::after {
+            content: "✨";
+            position: absolute;
+            right: 20px;
+            bottom: 15px;
+            font-size: 20px;
+            opacity: 0.6;
+        }
+        #danmaku-container::before {
+            content: "✨";
+            position: absolute;
+            left: 20px;
+            top: 15px;
+            font-size: 20px;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <div id="danmaku-container">
+        <div class="content" id="danmaku-content"></div>
+    </div>
+
+    <script>
+        const container = document.getElementById('danmaku-container');
+        const contentEl = document.getElementById('danmaku-content');
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = protocol + '//' + window.location.host + '/ws/overlay';
+            const ws = new WebSocket(wsUrl);
+
+            ws.onmessage = function(event) {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.action === 'show') {
+                        contentEl.textContent = msg.data.content || '';
+                        container.classList.add('show');
+                    } else if (msg.action === 'clear') {
+                        // 消失时可以先缩小再隐藏
+                        container.classList.remove('show');
+                    }
+                } catch (e) {}
+            };
+
+            ws.onclose = function() {
+                setTimeout(connect, 2000);
+            };
+        }
+
+        connect();
+    </script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>灵动棉花糖字幕</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;700&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #F0F4F8; 
+            overflow: hidden;
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+
+        #subtitle-wrapper {
+            position: absolute;
+            bottom: 100px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+
+        #subtitle-box {
+            background: #E0F2F1; 
+            border: 6px solid #FFFFFF;
+            box-shadow: 0 15px 45px rgba(184, 226, 200, 0.5);
+            padding: 25px 55px;
+            border-radius: 45px;
+            max-width: 80%;
+            min-width: 450px;
+            
+            /* 初始状态：缩小并向下位移 */
+            opacity: 0;
+            transform: translateY(60px) scale(0.7);
+            
+            /* 使用 Spring 过渡 */
+            transition: 
+                opacity 0.4s ease-out,
+                transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            
+            position: relative;
+        }
+
+        /* 激活状态 */
+        #subtitle-box.active {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            /* 激活后持续的轻微漂浮动画 */
+            animation: jelly-float 4s ease-in-out infinite;
+        }
+
+        #subtitle-text {
+            color: #546E7A;
+            font-size: 48px;
+            font-weight: 700;
+            line-height: 1.4;
+            text-align: center;
+            /* 文字入场的小动画 */
+            transition: all 0.3s ease;
+        }
+
+        /* 侧边装饰小圆点 */
+        #subtitle-box::after, #subtitle-box::before {
+            content: "";
+            position: absolute;
+            width: 15px;
+            height: 15px;
+            background: #FFECB3;
+            border-radius: 50%;
+            bottom: -5px;
+        }
+        #subtitle-box::before { left: 40px; }
+        #subtitle-box::after { right: 40px; }
+
+        /* 果冻漂浮动画 */
+        @keyframes jelly-float {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            33% { transform: translateY(-8px) rotate(0.5deg) scaleX(1.01); }
+            66% { transform: translateY(-4px) rotate(-0.5deg) scaleX(0.99); }
+        }
+
+        /* 消失时的动画类（可选） */
+        #subtitle-box.hiding {
+            transform: translateY(20px) scale(0.9);
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="subtitle-wrapper">
+        <div id="subtitle-box">
+            <div id="subtitle-text"></div>
+        </div>
+    </div>
+
+    <script>
+        const box = document.getElementById('subtitle-box');
+        const textEl = document.getElementById('subtitle-text');
+        let hideTimer = null;
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/subtitles`;
+            const ws = new WebSocket(wsUrl);
+
+            ws.onmessage = function(event) {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'startSpeaking' && msg.data.text) {
+                        updateSubtitle(msg.data.text);
+                    } else if (msg.type === 'allChunksCompleted') {
+                        hideSubtitle();
+                    }
+                } catch (e) {}
+            };
+            ws.onclose = () => setTimeout(connect, 2000);
+        }
+
+        function updateSubtitle(text) {
+            const cleanText = text.replace(/<[^>]+>/g, '').trim();
+            if (!cleanText) return;
+
+            // 文字切换时的微小抖动效果
+            textEl.style.opacity = 0;
+            setTimeout(() => {
+                textEl.textContent = cleanText;
+                textEl.style.opacity = 1;
+            }, 50);
+
+            box.classList.remove('hiding');
+            box.classList.add('active');
+
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(hideSubtitle, 7000); 
+        }
+
+        function hideSubtitle() {
+            box.classList.add('hiding');
+            setTimeout(() => {
+                box.classList.remove('active');
+                box.classList.remove('hiding');
+            }, 500);
+        }
+
+        connect();
+    </script>
+</body>
+</html>

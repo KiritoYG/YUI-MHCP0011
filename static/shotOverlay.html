@@ -1,0 +1,357 @@
+<!doctype html>
+<html style="margin:0;padding:0;width:100%;height:100%;overflow:hidden;">
+<head>
+  <meta charset="utf-8"/>
+  <title>截图选区</title>
+  <style>
+    html,body{margin:0;width:100vw;height:100vh;overflow:hidden; user-select: none;}
+    
+    /* 背景蒙层画布 */
+    #canvas{position:fixed;left:0;top:0;width:100%;height:100%;z-index:2;cursor:crosshair;}
+    
+    /* 选区框体 */
+    #box{
+      position:absolute;
+      border:2px solid #00a1ff;
+      z-index:3;
+      display:none; 
+      box-shadow: 0 0 8px rgba(0,161,255,0.4);
+      background: rgba(0,0,0,0.01); 
+      cursor: move;
+    }
+
+    /* 控制点样式 */
+    .handle {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: #00a1ff;
+      border: 1px solid #fff;
+      border-radius: 50%;
+      z-index: 4;
+      transform: translate(-50%, -50%);
+    }
+    .handle.nw { top: 0; left: 0; cursor: nwse-resize; }
+    .handle.n  { top: 0; left: 50%; cursor: ns-resize; }
+    .handle.ne { top: 0; left: 100%; cursor: nesw-resize; }
+    .handle.e  { top: 50%; left: 100%; cursor: ew-resize; }
+    .handle.se { top: 100%; left: 100%; cursor: nwse-resize; }
+    .handle.s  { top: 100%; left: 50%; cursor: ns-resize; }
+    .handle.sw { top: 100%; left: 0; cursor: nesw-resize; }
+    .handle.w  { top: 50%; left: 0; cursor: ew-resize; }
+
+    /* --- 工具栏样式（提取到外层，绝对定位） --- */
+    #toolbar {
+      position: absolute;
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      padding: 4px;
+      gap: 4px;
+      z-index: 10;
+      display: none; /* js 中会设置为 flex */
+      cursor: default;
+    }
+    .tool-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: none;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: background 0.2s;
+    }
+    .tool-btn:hover { background: #f0f0f0; }
+    .tool-btn.cancel { color: #ff4d4f; }
+    .tool-btn.confirm { color: #52c41a; }
+
+    /* 提示弹窗样式 */
+    #lang-tip {
+      position: fixed;
+      bottom: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 20, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 50px;
+      font-family: -apple-system, "Noto Sans SC", sans-serif;
+      font-size: 15px;
+      font-weight: 500;
+      z-index: 100;
+      pointer-events: none;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      display: none;
+      opacity: 0;
+      transition: opacity 0.4s, transform 0.4s;
+    }
+    #lang-tip.show { display: block; opacity: 1; transform: translateX(-50%) translateY(-10px); }
+  </style>
+</head>
+<body>
+  <!-- 提示容器 -->
+  <div id="lang-tip"></div>
+
+  <!-- 蒙版画布 -->
+  <canvas id="canvas"></canvas>
+
+  <!-- 选区框及内部元素 -->
+  <div id="box">
+    <!-- 八个方向的拉伸控制点 -->
+    <div class="handle nw" data-dir="nw"></div>
+    <div class="handle n" data-dir="n"></div>
+    <div class="handle ne" data-dir="ne"></div>
+    <div class="handle e" data-dir="e"></div>
+    <div class="handle se" data-dir="se"></div>
+    <div class="handle s" data-dir="s"></div>
+    <div class="handle sw" data-dir="sw"></div>
+    <div class="handle w" data-dir="w"></div>
+  </div>
+
+  <!-- 工具栏（与box解绑，避免被遮挡） -->
+  <div id="toolbar">
+    <button class="tool-btn cancel" id="btn-cancel" title="取消 (Esc)">✖</button>
+    <button class="tool-btn confirm" id="btn-confirm" title="完成 (Enter)">✔</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const box = document.getElementById('box');
+    const tip = document.getElementById('lang-tip');
+    const toolbar = document.getElementById('toolbar');
+
+    // 语言文案
+    const locales = {
+      'zh-CN': '💡 按住左键拖动框选可见范围，拖拽边缘可调整，右键取消',
+      'en-US': '💡 Drag to select visible area, drag edges to resize, right-click to cancel',
+    }
+
+    let hideTimer = null;
+
+    if (window.electronAPI && window.electronAPI.onSetLanguage) {
+      window.electronAPI.onSetLanguage((lang) => {
+        tip.innerText = locales[lang] || locales['zh-CN'];
+        tip.style.display = 'block';
+        requestAnimationFrame(() => tip.classList.add('show'));
+        hideTimer = setTimeout(fadeOutTip, 5000);
+      });
+    } else {
+      tip.innerText = locales['zh-CN'];
+      tip.style.display = 'block';
+      requestAnimationFrame(() => tip.classList.add('show'));
+    }
+
+    function fadeOutTip() {
+      if (hideTimer) clearTimeout(hideTimer);
+      tip.classList.remove('show');
+      setTimeout(() => { if (!tip.classList.contains('show')) tip.style.display = 'none'; }, 500);
+    }
+    function hideTipImmediately() {
+        if (hideTimer) clearTimeout(hideTimer);
+        tip.style.transition = 'none';
+        tip.classList.remove('show');
+        tip.style.display = 'none';
+    }
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      drawMask();
+      if (toolbar.style.display === 'flex') positionToolbar();
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function drawMask() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'rgba(0,0,0,.5)';
+      if (box.style.display === 'none') {
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+      const x = parseInt(box.style.left) || 0;
+      const y = parseInt(box.style.top) || 0;
+      const w = parseInt(box.style.width) || 0;
+      const h = parseInt(box.style.height) || 0;
+
+      ctx.fillRect(0, 0, canvas.width, y); 
+      ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h); 
+      ctx.fillRect(0, y, x, h); 
+      ctx.fillRect(x + w, y, canvas.width - x - w, h); 
+    }
+
+    drawMask();
+
+    // 核心状态管理
+    let action = 'none'; 
+    let resizeDir = '';
+    let rect = { x: 0, y: 0, w: 0, h: 0 };
+    let startPos = { x: 0, y: 0, rectX: 0, rectY: 0, rectW: 0, rectH: 0 };
+
+    function renderBox() {
+      box.style.left = rect.x + 'px';
+      box.style.top = rect.y + 'px';
+      box.style.width = rect.w + 'px';
+      box.style.height = rect.h + 'px';
+      drawMask();
+    }
+
+    // --- 重点：智能定位工具栏 ---
+    function positionToolbar() {
+      // 预估工具栏的宽高
+      const tbWidth = 80;  
+      const tbHeight = 44; 
+      const gap = 8; // 选框与工具栏的间距
+      
+      // 安全边距：防止被底部的Dock或侧边的Dock遮挡
+      const SAFE_BOTTOM = 80; 
+      const SAFE_SIDES = 60; 
+      const SAFE_TOP = 10;
+
+      const usableHeight = canvas.height - SAFE_BOTTOM;
+      const usableWidth = canvas.width - SAFE_SIDES;
+
+      // 默认目标位置：选框的右下角外部
+      let tx = rect.x + rect.w - tbWidth;
+      let ty = rect.y + rect.h + gap; 
+
+      // 1. 如果下方超出安全区域（会碰到底部 Dock）
+      if (ty + tbHeight > usableHeight) {
+        // 尝试放到选框上方
+        ty = rect.y - tbHeight - gap;
+        
+        // 2. 如果上方也越界了（说明选区非常大，纵向占满了屏幕）
+        if (ty < SAFE_TOP) {
+          // 强制放入选区内部靠下的位置，且严格保证不越过底部的 Dock 安全线
+          ty = Math.min(rect.y + rect.h - tbHeight - gap, usableHeight - tbHeight);
+          // 极限兜底：确保一定不会超顶
+          ty = Math.max(SAFE_TOP, ty);
+        }
+      }
+
+      // 3. 横向 X 坐标的安全区限制（防止被左右两侧的 Dock 遮挡）
+      tx = Math.max(SAFE_SIDES, Math.min(tx, usableWidth - tbWidth));
+
+      // 应用位置
+      toolbar.style.left = tx + 'px';
+      toolbar.style.top = ty + 'px';
+    }
+
+    window.addEventListener('mousedown', e => {
+      if (e.button === 2) { cancelAction(); return; }
+
+      // 点击工具栏自身时不拦截逻辑
+      if (e.target.closest('#toolbar')) return;
+
+      hideTipImmediately();
+      toolbar.style.display = 'none'; // 操作时先隐藏工具栏
+
+      startPos = { 
+        x: e.clientX, 
+        y: e.clientY,
+        rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h
+      };
+
+      if (e.target.classList.contains('handle')) {
+        action = 'resize';
+        resizeDir = e.target.getAttribute('data-dir');
+      } else if (e.target === box) {
+        action = 'move';
+      } else {
+        action = 'draw';
+        box.style.display = 'block';
+        rect.x = e.clientX;
+        rect.y = e.clientY;
+        rect.w = 0;
+        rect.h = 0;
+        renderBox();
+      }
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (action === 'none') return;
+
+      const dx = e.clientX - startPos.x;
+      const dy = e.clientY - startPos.y;
+
+      if (action === 'draw') {
+        rect.x = Math.min(e.clientX, startPos.x);
+        rect.y = Math.min(e.clientY, startPos.y);
+        rect.w = Math.abs(dx);
+        rect.h = Math.abs(dy);
+      } 
+      else if (action === 'move') {
+        rect.x = Math.max(0, Math.min(canvas.width - rect.w, startPos.rectX + dx));
+        rect.y = Math.max(0, Math.min(canvas.height - rect.h, startPos.rectY + dy));
+      } 
+      else if (action === 'resize') {
+        let x1 = startPos.rectX;
+        let y1 = startPos.rectY;
+        let x2 = startPos.rectX + startPos.rectW;
+        let y2 = startPos.rectY + startPos.rectH;
+
+        if (resizeDir.includes('w')) x1 = e.clientX;
+        if (resizeDir.includes('e')) x2 = e.clientX;
+        if (resizeDir.includes('n')) y1 = e.clientY;
+        if (resizeDir.includes('s')) y2 = e.clientY;
+
+        rect.x = Math.min(x1, x2);
+        rect.y = Math.min(y1, y2);
+        rect.w = Math.abs(x2 - x1);
+        rect.h = Math.abs(y2 - y1);
+      }
+      renderBox();
+    });
+
+    window.addEventListener('mouseup', e => {
+      if (action === 'none') return;
+      action = 'none';
+
+      if (rect.w < 5 || rect.h < 5) {
+        box.style.display = 'none';
+        toolbar.style.display = 'none';
+        drawMask();
+        return;
+      }
+
+      // 操作完成后，计算工具栏位置并展示
+      positionToolbar();
+      toolbar.style.display = 'flex';
+    });
+
+    function cancelAction() {
+      if (window.electronAPI) window.electronAPI.cancelShot();
+    }
+
+    function confirmAction() {
+      if (rect.w < 5 || rect.h < 5) { cancelAction(); return; }
+      if (window.electronAPI) {
+        window.electronAPI.finishShot({
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.w),
+          height: Math.round(rect.h)
+        });
+      }
+    }
+
+    document.getElementById('btn-cancel').addEventListener('click', cancelAction);
+    document.getElementById('btn-confirm').addEventListener('click', confirmAction);
+
+    window.addEventListener('contextmenu', e => e.preventDefault());
+
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape') cancelAction();
+      if (e.key === 'Enter' && box.style.display !== 'none') confirmAction();
+    });
+  </script>
+</body>
+</html>

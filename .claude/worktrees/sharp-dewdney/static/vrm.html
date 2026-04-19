@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>three-vrm example</title>
+		<link rel="stylesheet" href="fontawesome/css/all.min.css">
+		<link rel="stylesheet" href="css/vrm.css">
+		<script src="js/locales.js"></script>
+		<link rel="stylesheet" href="libs/element-plus.css">
+		<script src="libs/vue.global.prod.js"></script>
+		<script src="libs/element-plus.js"></script>
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
+		/>
+		<style>
+			body.electron {
+			background: transparent !important;
+			overflow: hidden;
+			}
+
+			body.web {
+				background: transparent !important;
+				overflow: hidden;
+			}
+			body {
+				margin: 0;
+			}
+			canvas {
+				display: block;
+				/* 简单的 CSS 锐化滤镜，性能开销极小 */
+				filter: contrast(1.05) brightness(1.02) drop-shadow(0 0 0 rgba(0,0,0,0)); 
+				/* 或者使用 image-rendering 属性 */
+				image-rendering: -webkit-optimize-contrast;
+			}
+			/* 当处于 XR 模式时，强制调整 UI 样式 */
+			:xr-overlay #control-panel {
+				/* 增加缩放，因为在 VR 里 UI 往往显得很小 */
+				transform: scale(1.5) !important;
+				transform-origin: top right;
+			}
+
+			#control-panel, #subtitle-container {
+				/* 确保 UI 可以被点击 */
+				pointer-events: auto !important;
+				/* 防止选中文字 */
+				user-select: none;
+			}
+
+			/* 隐藏在 XR 中没用的拖拽手柄 */
+			:xr-overlay #drag-handle {
+				display: none !important;
+			}
+
+		</style>
+	</head>
+
+	<body>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./libs/three/build/three.module.js",
+					"three/tsl": "./libs/three/build/three.tsl.js",
+					"three/addons/": "./libs/three/examples/jsm/",
+					"@pixiv/three-vrm": "./libs/@pixiv/three-vrm/lib/three-vrm.module.js",
+					"@pixiv/three-vrm/nodes": "./libs/@pixiv/three-vrm/lib/nodes/index.module.js",
+					"@pixiv/three-vrm-animation": "./libs/@pixiv/three-vrm-animation/lib/three-vrm-animation.module.js",
+					"@sparkjsdev/spark": "./libs/@sparkjsdev/spark/dist/spark.module.js"
+				}
+			}
+		</script>
+		<script type="module" src="js/vrm.js"></script>
+	</body>
+</html>
