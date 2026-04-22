@@ -1,6 +1,10 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\.devcontainer",
+    "\\config",
+    "\\skills"
   ],
+  "SelectedNode": "\\server.py",
   "PreviewInSolutionExplorer": false
 }

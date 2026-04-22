@@ -907,6 +907,18 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </el-button>
                     </el-tooltip>
 
+                    <el-tooltip :content="t('snapshotCamera')" placement="top">
+                      <el-button
+                        @click="triggerCameraSnapshot()"
+                        class="icon-btn vision-btn"
+                        :loading="isCameraSnapshotLoading"
+                        type="default"
+                        v-if="MoreButtonDict.find(b => b.name === 'cameraSnapshotButton')?.enabled||isCapsuleMode"
+                        circle>
+                        <i class="fa-solid fa-video"></i>
+                      </el-button>
+                    </el-tooltip>
+
                     <el-tooltip :content="t('asr')" placement="top">
                       <el-button
                         @click="toggleASR"
@@ -1081,6 +1093,18 @@ function updateElement(el, rawMarkdown, formatFn) {
                         v-if="isElectron&&(MoreButtonDict.find(b => b.name === 'screenshotButton')?.enabled||isCapsuleMode)"
                         circle>
                         <i class="fa-solid fa-scissors"></i>
+                      </el-button>
+                    </el-tooltip>
+
+                    <el-tooltip :content="t('snapshotCamera')" placement="top">
+                      <el-button
+                        @click="triggerCameraSnapshot()"
+                        class="icon-btn vision-btn"
+                        :loading="isCameraSnapshotLoading"
+                        type="default"
+                        v-if="MoreButtonDict.find(b => b.name === 'cameraSnapshotButton')?.enabled||isCapsuleMode"
+                        circle>
+                        <i class="fa-solid fa-video"></i>
                       </el-button>
                     </el-tooltip>
 
@@ -4715,63 +4739,6 @@ function updateElement(el, rawMarkdown, formatFn) {
                   </template>
                 </el-dialog>
               </div>
-              <!-- 桌面视觉 -->
-              <div v-show="subMenu === 'vision'" class="page">
-                <el-form v-if="isElectron" :model="visionSettings" class="settings-form"  label-position="top">
-                  <div class="tool-item">
-                    <div class="tool-header">
-                      <div class="header-left">
-                        <span>
-                          <el-icon>
-                            <i class="fa-solid fa-eye"></i>
-                          </el-icon>
-                          {{ t('desktopVision') }}
-                        </span>
-                      </div>
-                      <el-switch v-model="visionSettings.desktopVision" @click.stop @change="autoSaveSettings"/>
-                    </div>
-                    <div class="tool-content">
-                      <el-form-item v-if="isElectron" :label="t('enableDesktopVisionWakeWord')" class="form-item-align" label-position="left">
-                        <el-switch 
-                          v-model="visionSettings.enableWakeWord" 
-                          @change="autoSaveSettings"
-                        ></el-switch>
-                      </el-form-item>
-                      <el-form-item v-if="isElectron" :label="t('desktopVisionWakeWord')" class="form-item-align">
-                        <el-input
-                          v-model="visionSettings.wakeWord"
-                          :placeholder="t('desktopVisionWakeWordPlaceholder')"
-                          @input="autoSaveSettings"
-                          type="textarea"
-                          :rows="3"
-                        />
-                      </el-form-item>
-                      <el-form-item :label="t('isFullScreen')" class="form-item-align" label-position="left">
-                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                          <el-switch v-model="visionControlSettings.isFullScreen" @click.stop @change="handleFullScreenChange"></el-switch>
-                        </div>
-                      </el-form-item>
-                      <el-form-item v-if="!visionControlSettings.isFullScreen">
-                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                          <span>
-                            {{t('currentFieldOfView')}} : [{{ visionControlSettings.ScreenSize.join(', ') }}]
-                          </span>
-                          <el-button 
-                            type="primary"
-                            @click="reselectRegion"
-                          >
-                            {{t('Reselect')}}
-                          </el-button>
-                        </div>
-                      </el-form-item>
-                    </div>
-                  </div>
-                </el-form>
-                <!-- Web端提示 -->
-                <div v-else >
-                  <el-empty :description="t('webNotSupported')" />
-                </div>
-              </div>
               <!-- 羁绊与数值系统 (Affection System) -->
               <div v-show="subMenu === 'affection'" class="page">
                 <el-tabs v-model="activeAffectionTab" @tab-change="handleAffectionTabChange">
@@ -6062,6 +6029,367 @@ function updateElement(el, rawMarkdown, formatFn) {
                           show-input
                           @input="autoSaveSettings"
                         />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-video"></i></el-icon>
+                          {{ t('cameraCapture') }}
+                        </span>
+                      </div>
+                      <el-switch v-model="visionSettings.cameraEnabled" @click.stop @change="autoSaveSettings"/>
+                    </div>
+                    <div class="tool-content">
+                      <!-- 供应商选择 -->
+                      <el-form-item :label="t('provider')" class="form-item-align">
+                        <el-select
+                          v-model="visionSettings.cameraSelectedProvider"
+                          :placeholder="t('selectProvider')"
+                          filterable
+                          clearable
+                          @change="selectCameraProvider"
+                          @visible-change="handleCameraProviderVisibleChange"
+                          class="full-width-input"
+                        >
+                          <el-option
+                            v-for="provider in modelProviders"
+                            :key="provider.id"
+                            :label="provider.vendor+' - '+provider.modelId"
+                            :value="provider.id"
+                          >
+                            <div class="provider-option">
+                              <img
+                                :src="getVendorLogo(provider.vendor)"
+                                class="mini-vendor-logo"
+                              />
+                              <span class="model-id">{{ provider.modelId }}</span>
+                            </div>
+                          </el-option>
+                        </el-select>
+                      </el-form-item>
+                      <!-- API 地址 -->
+                      <el-form-item :label="t('apiAddress')" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.cameraBaseUrl"
+                          :placeholder="'http://localhost:8000/v1'"
+                          @input="autoSaveSettings"
+                          clearable
+                        />
+                      </el-form-item>
+                      <!-- API 密钥 -->
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.cameraApiKey"
+                          :placeholder="'EMPTY'"
+                          @input="autoSaveSettings"
+                          type="password"
+                          show-password
+                          clearable
+                        />
+                      </el-form-item>
+                      <!-- 模型名称 -->
+                      <el-form-item :label="t('modelName')" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.cameraModel"
+                          :placeholder="'Qwen/Qwen3-VL-7B-Instruct'"
+                          @input="autoSaveSettings"
+                          clearable
+                        />
+                      </el-form-item>
+                      <!-- 捕获源类型 -->
+                      <el-form-item :label="t('captureSource') || '捕获源'" class="form-item-align">
+                        <div style="display:flex; gap:8px; width:100%; align-items:center;">
+                          <el-radio-group
+                            v-model="visionSettings.captureSourceType"
+                            @change="autoSaveSettings"
+                            size="small"
+                          >
+                            <el-radio-button label="camera">{{ t('captureSourceCamera') || '摄像头' }}</el-radio-button>
+                            <el-radio-button label="monitor">{{ t('captureSourceMonitor') || '显示器' }}</el-radio-button>
+                            <el-radio-button label="window">{{ t('captureSourceWindow') || '窗口/程序' }}</el-radio-button>
+                          </el-radio-group>
+                          <el-button
+                            size="small"
+                            :loading="captureSourcesLoading"
+                            @click="refreshCaptureSources"
+                          >
+                            <el-icon><i class="fa-solid fa-arrows-rotate"></i></el-icon>
+                            {{ t('refresh') || '刷新' }}
+                          </el-button>
+                        </div>
+                      </el-form-item>
+                      <!-- 摄像头选择 -->
+                      <el-form-item
+                        v-if="visionSettings.captureSourceType === 'camera'"
+                        :label="t('captureSourceCamera') || '摄像头'"
+                        class="form-item-align"
+                      >
+                        <el-select
+                          v-model="visionSettings.captureSourceIndex"
+                          :placeholder="t('captureSelectPlaceholder') || '选择摄像头（默认 0）'"
+                          filterable
+                          clearable
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option
+                            v-for="c in captureSources.cameras"
+                            :key="'cam-'+c.index"
+                            :label="`#${c.index} · ${c.name}`"
+                            :value="c.index"
+                          />
+                          <el-option
+                            v-if="!captureSources.cameras.length"
+                            :label="t('captureNoSources') || '点刷新枚举摄像头'"
+                            :value="0"
+                          />
+                        </el-select>
+                      </el-form-item>
+                      <!-- 显示器选择 -->
+                      <el-form-item
+                        v-if="visionSettings.captureSourceType === 'monitor'"
+                        :label="t('captureSourceMonitor') || '显示器'"
+                        class="form-item-align"
+                      >
+                        <el-select
+                          v-model="visionSettings.captureSourceIndex"
+                          :placeholder="t('captureSelectPlaceholder') || '选择显示器'"
+                          filterable
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option :label="t('captureAllScreens') || '全部屏幕拼接'" :value="-1" />
+                          <el-option
+                            v-for="m in captureSources.monitors"
+                            :key="'mon-'+m.index"
+                            :label="`#${m.index} · ${m.name} (${m.width}×${m.height})${m.is_primary ? ' · 主屏' : ''}`"
+                            :value="m.index"
+                          />
+                          <el-option
+                            v-if="!captureSources.monitors.length"
+                            :label="t('captureNoSources') || '点刷新枚举显示器'"
+                            :value="0"
+                          />
+                        </el-select>
+                      </el-form-item>
+                      <!-- 窗口/程序选择 -->
+                      <el-form-item
+                        v-if="visionSettings.captureSourceType === 'window'"
+                        :label="t('captureSourceWindow') || '窗口/程序'"
+                        class="form-item-align"
+                      >
+                        <el-select
+                          v-model="visionSettings.captureWindowHwnd"
+                          :placeholder="t('captureWindowPlaceholder') || '选择窗口（按程序名/标题搜索）'"
+                          filterable
+                          clearable
+                          @change="(v) => { const w = captureSources.windows.find(x => x.hwnd === v); if (w) visionSettings.captureWindowTitle = w.title; autoSaveSettings(); }"
+                          class="full-width-input"
+                        >
+                          <el-option
+                            v-for="w in captureSources.windows"
+                            :key="'win-'+w.hwnd"
+                            :label="`${w.exe || '?'} · ${w.title} (${w.width}×${w.height})`"
+                            :value="w.hwnd"
+                          />
+                          <el-option
+                            v-if="!captureSources.windows.length"
+                            :label="t('captureNoSources') || '点刷新枚举窗口'"
+                            :value="null"
+                          />
+                        </el-select>
+                      </el-form-item>
+                      <el-form-item
+                        v-if="visionSettings.captureSourceType === 'window'"
+                        :label="t('captureWindowTitle') || '标题关键词（模糊匹配备用）'"
+                        class="form-item-align"
+                      >
+                        <el-input
+                          v-model="visionSettings.captureWindowTitle"
+                          placeholder="VRChat / Chrome / ..."
+                          clearable
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <!-- 默认分析指令 -->
+                      <el-form-item :label="t('cameraPrompt')" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.cameraPrompt"
+                          :placeholder="t('cameraPromptPlaceholder')"
+                          @input="autoSaveSettings"
+                          type="textarea"
+                          :rows="3"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <!-- 本地 Qwen VL 一键启动 -->
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-microchip"></i></el-icon>
+                          {{ t('qwenVlLocal') || '本地 Qwen VL (vLLM)' }}
+                          <el-tag
+                            v-if="qwenVlStatus.ready"
+                            type="success"
+                            size="small"
+                            style="margin-left:8px;"
+                          >{{ t('qwenVlReady') || '就绪' }}</el-tag>
+                          <el-tag
+                            v-else-if="qwenVlStatus.running"
+                            type="warning"
+                            size="small"
+                            style="margin-left:8px;"
+                          >{{ t('qwenVlLoading') || '加载中' }}</el-tag>
+                          <el-tag
+                            v-else
+                            type="info"
+                            size="small"
+                            style="margin-left:8px;"
+                          >{{ t('qwenVlStopped') || '未运行' }}</el-tag>
+                        </span>
+                      </div>
+                      <el-switch
+                        :model-value="qwenVlStatus.running"
+                        :loading="qwenVlBusy"
+                        @click.stop
+                        @change="toggleQwenVl"
+                      />
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('qwenVlModelPath') || '模型路径'" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.qwenVlModelPath"
+                          placeholder="G:\Qwen2.5-VL-3B-Instruct"
+                          @input="autoSaveSettings"
+                          clearable
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('qwenVlHostPort') || '监听 Host:Port'" class="form-item-align">
+                        <div style="display:flex; gap:8px; width:100%;">
+                          <el-input
+                            v-model="visionSettings.qwenVlHost"
+                            placeholder="127.0.0.1"
+                            @input="autoSaveSettings"
+                            style="flex:2;"
+                          />
+                          <el-input-number
+                            v-model="visionSettings.qwenVlPort"
+                            :min="1024"
+                            :max="65535"
+                            controls-position="right"
+                            @change="autoSaveSettings"
+                            style="flex:1; min-width:130px;"
+                          />
+                        </div>
+                      </el-form-item>
+                      <el-form-item :label="t('qwenVlServedName') || '服务名'" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.qwenVlServedName"
+                          placeholder="Qwen2.5-VL-3B"
+                          @input="autoSaveSettings"
+                          clearable
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('qwenVlExtraArgs') || '额外参数'" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.qwenVlExtraArgs"
+                          placeholder="--dtype auto --max-new-tokens 1024"
+                          @input="autoSaveSettings"
+                          clearable
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('qwenVlCommandTemplate') || '自定义命令模板'" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.qwenVlCommandTemplate"
+                          :placeholder="'留空使用默认 vllm serve；可用占位符 {model} {host} {port} {name} {extra}'"
+                          @input="autoSaveSettings"
+                          type="textarea"
+                          :rows="2"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('qwenVlAutoFillCamera') || '启动后自动填入摄像头 API'" class="form-item-align">
+                        <el-switch
+                          v-model="visionSettings.qwenVlAutoFillCamera"
+                          @change="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item
+                        v-if="qwenVlStatus.logs_tail && qwenVlStatus.logs_tail.length"
+                        :label="t('qwenVlLogs') || '启动日志'"
+                        class="form-item-align"
+                      >
+                        <div style="width:100%; max-height:160px; overflow:auto; background:var(--el-fill-color-darker); padding:6px 8px; border-radius:4px; font-family:monospace; font-size:11px; white-space:pre-wrap;">
+                          <div v-for="(line, i) in qwenVlStatus.logs_tail" :key="i">{{ line }}</div>
+                        </div>
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <!-- 桌面视觉唤醒词（Electron 专用） -->
+                  <div v-if="isElectron" class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-eye"></i></el-icon>
+                          {{ t('desktopVision') }}
+                        </span>
+                      </div>
+                      <el-switch v-model="visionSettings.desktopVision" @click.stop @change="autoSaveSettings"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('enableDesktopVisionWakeWord')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionSettings.enableWakeWord" @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('desktopVisionWakeWord')" class="form-item-align">
+                        <el-input
+                          v-model="visionSettings.wakeWord"
+                          :placeholder="t('desktopVisionWakeWordPlaceholder')"
+                          @input="autoSaveSettings"
+                          type="textarea"
+                          :rows="3"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <!-- 视觉控制（鼠标/键盘/实时桌面 · Electron 专用） -->
+                  <div v-if="isElectron" class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-arrow-pointer"></i></el-icon>
+                          {{ t('visionControl') }}
+                        </span>
+                      </div>
+                      <el-switch v-model="visionControlSettings.enabled" @click.stop @change="handleVisionControlEnableToggle(visionControlSettings.enabled)"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('mouseControl')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.mouse" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('keyboardControl')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.keyboard" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('realtimeDesktopVision')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.desktopVision" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('onlyNewScreen')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.onlyNewScreen" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('isEnableGrid')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.isEnableGrid" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('isFullScreen')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.isFullScreen" @click.stop @change="handleFullScreenChange"/>
+                      </el-form-item>
+                      <el-form-item v-if="!visionControlSettings.isFullScreen">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                          <span>{{t('currentFieldOfView')}} : [{{ visionControlSettings.ScreenSize.join(', ') }}]</span>
+                          <el-button type="primary" @click="reselectRegion">{{t('Reselect')}}</el-button>
+                        </div>
                       </el-form-item>
                     </div>
                   </div>
@@ -8600,63 +8928,6 @@ function updateElement(el, rawMarkdown, formatFn) {
                     </div>
                   </div>
                 </el-form> 
-              </div>
-              <!-- 视觉控制界面 -->
-              <div v-show="subMenu === 'visionControl'" class="page">
-                <el-form v-if="isElectron" :model="visionControlSettings" class="settings-form"  label-position="top">
-                  <div class="tool-item">
-                    <div class="tool-header">
-                      <div class="header-left">
-                        <span>
-                          <el-icon>
-                            <i class="fa-solid fa-arrow-pointer"></i>
-                          </el-icon>
-                          {{ t('visionControl') }}
-                        </span>
-                      </div>
-                      <el-switch v-model="visionControlSettings.enabled" @click.stop @change="handleVisionControlEnableToggle(visionControlSettings.enabled)"/>
-                    </div>
-                    <div class="tool-content">
-                      <el-form-item :label="t('mouseControl')" class="form-item-align" label-position="left">
-                        <el-switch v-model="visionControlSettings.mouse" @click.stop @change="autoSaveSettings"/>
-                      </el-form-item>
-                      <el-form-item :label="t('keyboardControl')" class="form-item-align" label-position="left">
-                        <el-switch v-model="visionControlSettings.keyboard" @click.stop @change="autoSaveSettings"/>
-                      </el-form-item>
-                      <el-form-item :label="t('realtimeDesktopVision')" class="form-item-align" label-position="left">
-                        <el-switch v-model="visionControlSettings.desktopVision" @click.stop @change="autoSaveSettings"/>
-                      </el-form-item>
-                      <el-form-item :label="t('onlyNewScreen')" class="form-item-align" label-position="left">
-                        <el-switch v-model="visionControlSettings.onlyNewScreen" @click.stop @change="autoSaveSettings"/>
-                      </el-form-item>
-                      <el-form-item :label="t('isEnableGrid')" class="form-item-align" label-position="left">
-                        <el-switch v-model="visionControlSettings.isEnableGrid" @click.stop @change="autoSaveSettings"/>
-                      </el-form-item>
-                      <el-form-item :label="t('isFullScreen')" class="form-item-align" label-position="left">
-                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                          <el-switch v-model="visionControlSettings.isFullScreen" @click.stop @change="handleFullScreenChange"></el-switch>
-                        </div>
-                      </el-form-item>
-                      <el-form-item v-if="!visionControlSettings.isFullScreen">
-                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                          <span>
-                            {{t('currentFieldOfView')}} : [{{ visionControlSettings.ScreenSize.join(', ') }}]
-                          </span>
-                          <el-button 
-                            type="primary"
-                            @click="reselectRegion"
-                          >
-                            {{t('Reselect')}}
-                          </el-button>
-                        </div>
-                      </el-form-item>
-                    </div>
-
-                  </div>
-                </el-form> 
-                <div v-else >
-                  <el-empty :description="t('webNotSupported')" />
-                </div>
               </div>
 
               <!-- 终端工具界面 -->
@@ -15892,6 +16163,17 @@ function updateElement(el, rawMarkdown, formatFn) {
                                 type="default"
                                 circle>
                                 <i class="fa-solid fa-scissors"></i>
+                              </el-button>
+                            </el-tooltip>
+
+                            <el-tooltip :content="t('snapshotCamera')" placement="top">
+                              <el-button
+                                @click="triggerCameraSnapshot()"
+                                class="icon-btn vision-btn"
+                                :loading="isCameraSnapshotLoading"
+                                type="default"
+                                circle>
+                                <i class="fa-solid fa-video"></i>
                               </el-button>
                             </el-tooltip>
 

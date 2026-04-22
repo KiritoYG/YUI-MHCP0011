@@ -57,3 +57,4 @@ slack-sdk
 dingtalk-stream
 pyautogui
 elevenlabs
+opencv-python

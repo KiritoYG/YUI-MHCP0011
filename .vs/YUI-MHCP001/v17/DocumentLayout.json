@@ -3,6 +3,10 @@
   "WorkspaceRootPath": "C:\\Users\\Kirito\\OneDrive\\\u684C\u9762\\YUI-MHCP001\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Kirito\\OneDrive\\\u684C\u9762\\YUI-MHCP001\\server.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:server.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Kirito\\OneDrive\\\u684C\u9762\\YUI-MHCP001\\.claude\\worktrees\\jolly-khorana\\doc\\image\\B.png||{58961B49-13E0-48C0-9258-13CBC4D40279}",
       "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:.claude\\worktrees\\jolly-khorana\\doc\\image\\B.png||{58961B49-13E0-48C0-9258-13CBC4D40279}"
     }
@@ -19,14 +23,26 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
+              "Title": "server.py",
+              "DocumentMoniker": "C:\\Users\\Kirito\\OneDrive\\\u684C\u9762\\YUI-MHCP001\\server.py",
+              "RelativeDocumentMoniker": "server.py",
+              "ToolTip": "C:\\Users\\Kirito\\OneDrive\\\u684C\u9762\\YUI-MHCP001\\server.py",
+              "RelativeToolTip": "server.py",
+              "ViewState": "AgIAAA8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "00000000-0000-0000-0000-000000000000.000000|iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAHfSURBVDhPpZCxaxNhGMZ/9zVJaUuDUlq1FBWLZBFTCXo4BFyU1qGKi4OkIHhkzF/g0KF00M2lR9YUdDDQQVAcJILoQUd1UNRmkhoRm8RL777v7nOoCZd4AcEH3uF5nvd73vd74X\u002BgtTai3LIsHeWDEEJct217a1DvwbIs7bpubFUqFW3b9naxWLwWfSOipAvHcfqqi0KhkMtms3cty1rsaomeG4FpmoMSANVqlXQ6nQMWgacMC4hOBchduEj\u002ByjKjScGh8SS1Wq3nxQZEN3j1eY/Vrfe8rTeQvsf89ARLS1cz5XIZ/uUGXxptQiVRUhJIybudXaZn52a7vbEBpmkyNb/A69YM9W8tDEJOTI2hpI\u002BSkvOZH2f13sNAB\u002B07sV9wHIdH9Unquz9RvoeUPtL3UFISKkky\u002BAT7HwTi6FpsgGma3N9\u002Bg5I\u002BKaFZyU8wOpJChwHnjiuE9wKCXyC/zsQGOI7DeELjtiUPbgky6Wd/HA3KBelC4AIpNfQGl88cQ0mfI5PugRhKkM2DUk0INYwtPI/dAGAlf4rbl06T6DyBVgeCABJzYPhwcm0V8ICNvwJKpVIf37h3IxSyKVAuBMDIYQAMw1jvaxwGrYNl3Xq5o79vat3Y3Nedj4\u002B11je7/m\u002BXOuyzFtDhUgAAAABJRU5ErkJggg==",
+              "WhenOpened": "2026-04-21T07:46:37.147Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
               "Title": "B.png",
               "DocumentMoniker": "C:\\Users\\Kirito\\OneDrive\\\u684C\u9762\\YUI-MHCP001\\.claude\\worktrees\\jolly-khorana\\doc\\image\\B.png",
               "RelativeDocumentMoniker": ".claude\\worktrees\\jolly-khorana\\doc\\image\\B.png",
               "ToolTip": "C:\\Users\\Kirito\\OneDrive\\\u684C\u9762\\YUI-MHCP001\\.claude\\worktrees\\jolly-khorana\\doc\\image\\B.png",
               "RelativeToolTip": ".claude\\worktrees\\jolly-khorana\\doc\\image\\B.png",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001533|",
-              "WhenOpened": "2026-04-12T12:03:55.559Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-12T12:03:55.559Z"
             }
           ]
         }

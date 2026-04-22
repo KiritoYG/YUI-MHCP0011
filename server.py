@@ -802,7 +802,16 @@ async def lifespan(app: FastAPI):
     for ext_id in ext_ids:
         try: await node_mgr.stop(ext_id)
         except: pass
-        
+
+    # 停止本地 Qwen VL 推理子进程
+    try:
+        from py.qwen_vl_launcher import qwen_vl_launcher
+        if qwen_vl_launcher.is_running():
+            print("Stopping local Qwen VL subprocess...")
+            await qwen_vl_launcher.stop()
+    except Exception as e:
+        print(f"qwen_vl_launcher stop failed: {e}")
+
     if global_http_client:
         await global_http_client.aclose()
     print("All processes terminated.")
@@ -1049,6 +1058,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         wait,
         screenshot
     )
+    from py.camera_tool import camera_capture
 
     # ==================== 2. 定义工具映射表 ====================
     _TOOL_HOOKS = {
@@ -1155,9 +1165,10 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         "keyboard_hotkey":keyboard_hotkey,
         "keyboard_hold":keyboard_hold,
         "wait":wait,
-        "screenshot":screenshot
+        "screenshot":screenshot,
+        "camera_capture":camera_capture,
     }
-    
+
     # ==================== 3. 权限拦截逻辑 (Human-in-the-loop) ====================
     # 定义受控的敏感工具列表
     # 这些工具在执行前需要检查权限配置 (.agent/config.json 或 全局设置)
@@ -1472,7 +1483,9 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                             
                             with open(cache_file, "w", encoding='utf-8') as f:
                                 f.write(result_text)
-    else:           
+    else:
+        # 未开启视觉模型：不要把原始 image_url 拼给主 LLM（DeepSeek 等主模型无法消费），
+        # 统一降级为文字占位，避免 400 "unknown variant image_url" 报错
         for image in images:
             index = image['index']
             if index < len(messages):
@@ -1481,18 +1494,19 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                         media_key = item['type']  # 'image_url' 或 'video_url'
                         file_hash = item[media_key]['hash']
                         media_name = "视频" if media_key == "video_url" else "图片"
-                        
                         cache_file = os.path.join(UPLOAD_FILES_DIR, f"{file_hash}.txt")
                         if os.path.exists(cache_file):
                             with open(cache_file, "r", encoding='utf-8') as f:
-                                messages[index]['content'] += f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{f.read()}\n\n"
+                                note = f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{f.read()}\n\n"
                         else:
-                            if isinstance(messages[index]['content'], str):
-                                messages[index]['content'] =[{"type": "text", "text": messages[index]['content']}]
-                            
-                            # 未开启视觉模型，直接以原生的 `video_url` 或 `image_url` 拼入请求，让当前大模型自行读取理解
-                            messages[index]['content'].append({"type": media_key, media_key: {"url": item[media_key]['url']}})
-                            
+                            note = f"\n\n[附件{media_name}(哈希值：{file_hash})，视觉模型未启用，已忽略图像内容]"
+                        if isinstance(messages[index]['content'], list):
+                            # 展平回字符串，剥离所有 image_url / video_url 项
+                            text_parts = [x.get('text', '') for x in messages[index]['content']
+                                          if isinstance(x, dict) and x.get('type') == 'text']
+                            messages[index]['content'] = ''.join(text_parts) + note
+                        else:
+                            messages[index]['content'] = str(messages[index]['content']) + note
     return messages
 
 async def read_todos_local(cwd: str) -> list:
@@ -2548,19 +2562,37 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 
                 await asyncio.to_thread(display_image.save, desktop_img_path, optimize=True)
                 desktop_url = f"{fastapi_base_url}uploaded_files/{desktop_img_name}"
-                
-                # 6. 注入到当前消息
+
+                # 6. 若视觉模型启用，先把截图交给视觉模型得到文字描述；否则仅以占位文本注入
+                # 避免把 image_url 直接塞进主 LLM（DeepSeek 等不支持，会 400）
+                vision_desc_text = ""
+                if vision_cfg.get('enabled') and vision_cfg.get('api_key') and vision_cfg.get('base_url') and vision_cfg.get('model'):
+                    try:
+                        v_client = AsyncOpenAI(api_key=vision_cfg['api_key'], base_url=vision_cfg['base_url'])
+                        v_resp = await v_client.chat.completions.create(
+                            model=vision_cfg['model'],
+                            messages=[{"role": "user", "content": [
+                                {"type": "text", "text": vision_cfg.get('prompt') or "请仔细描述这张桌面截图中的内容，包含可见的文字、窗口、图标、布局、人物、物体等关键信息。"},
+                                {"type": "image_url", "image_url": {"url": desktop_url}}
+                            ]}],
+                            temperature=vision_cfg.get('temperature', 0.3),
+                        )
+                        vision_desc_text = str(v_resp.choices[0].message.content or "")
+                    except Exception as ve:
+                        print(f"视觉模型处理桌面截图失败: {ve}")
+
+                if vision_desc_text:
+                    injected_note = grid_hint + f"\n\nsystem: 桌面截图内容识别结果：\n\n{vision_desc_text}\n\n"
+                else:
+                    injected_note = grid_hint + f"\n\n[桌面截图地址: {desktop_url} （视觉模型未启用或调用失败，仅提供占位）]"
+
                 current_user_msg = request.messages[-1]
                 if isinstance(current_user_msg['content'], str):
-                    original_text = current_user_msg['content']
-                    current_user_msg['content'] = [
-                        {"type": "text", "text": original_text + grid_hint},
-                        {"type": "image_url", "image_url": {"url": desktop_url}}
-                    ]
+                    current_user_msg['content'] = current_user_msg['content'] + injected_note
                 elif isinstance(current_user_msg['content'], list):
-                    current_user_msg['content'].append(
-                        {"type": "image_url", "image_url": {"url": desktop_url}}
-                    )
+                    text_parts = [x.get('text', '') for x in current_user_msg['content']
+                                  if isinstance(x, dict) and x.get('type') == 'text']
+                    current_user_msg['content'] = ''.join(text_parts) + injected_note
                 
                 # 7. 清理历史截图 (如果开启了 onlyNewScreen)
                 if settings.get('visionControlSettings', {}).get('onlyNewScreen', False):
@@ -2727,6 +2759,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         from py.cdp_tool import all_cdp_tools
         from py.random_topic import random_topics_tools
         from py.computer_use_tool import computer_use_tools,mouse_use_tools,keyboard_use_tools,desktopVision_use_tools
+        from py.camera_tool import camera_use_tools
 
         from py.task_tools import (
             create_subtask_tool,
@@ -2833,6 +2866,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 tools.extend(keyboard_use_tools)
             if not settings['visionControlSettings']['desktopVision']:
                 tools.extend(desktopVision_use_tools)
+        if settings.get('vision', {}).get('cameraEnabled'):
+            tools.extend(camera_use_tools)
         if settings['tools']['time']['enabled'] and settings['tools']['time']['triggerMode'] == 'afterThinking':
             tools.append(time_tool)
         if settings["tools"]["weather"]['enabled']:
@@ -2941,7 +2976,12 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             # 找出request.messages中上次的assistant回复
             for i in range(len(request.messages)-1, -1, -1):
                 if request.messages[i]['role'] == 'assistant':
-                    assistant_reply = request.messages[i]['content']
+                    assistant_reply = request.messages[i].get('content') or ""
+                    if isinstance(assistant_reply, list):
+                        assistant_reply = "".join(
+                            x.get('text', '') for x in assistant_reply
+                            if isinstance(x, dict) and x.get('type') == 'text'
+                        )
                     break
             if cur_memory["characterBook"]:
                 for lore in cur_memory["characterBook"]:
@@ -3910,7 +3950,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
 
                         modified_tool = f"{await t("sendArg")}{data_list[0]}"
                         
-                        if settings['tools']['asyncTools']['enabled']:
+                        # 视觉类工具强制同步执行（异步会让 Yui 在结果回来前就结束发言、且不会主动回推），
+                        # 保持对话连贯：调用完成后同一轮直接继续回复。
+                        _force_sync_tools = {"camera_capture", "get_image_content"}
+                        if settings['tools']['asyncTools']['enabled'] and response_content.name not in _force_sync_tools:
                             # ... 异步工具逻辑保持不变 ...
                             tool_id = uuid.uuid4()
                             async_tool_id = f"{response_content.name}_{tool_id}"
@@ -4764,7 +4807,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             }
         )
     except Exception as e:
-        logger.error(f"Error occurred: {e}")
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Error occurred: {e}\n{tb}")
+        print(f"CHAT OUTER ERROR:\n{tb}", flush=True)
         # 如果e.status_code存在，则使用它作为HTTP状态码，否则使用500
         return JSONResponse(
             status_code=getattr(e, "status_code", 500),
@@ -4854,6 +4900,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
     from py.cdp_tool import all_cdp_tools
     from py.random_topic import random_topics_tools
     from py.computer_use_tool import computer_use_tools,mouse_use_tools,keyboard_use_tools,desktopVision_use_tools
+    from py.camera_tool import camera_use_tools
     m0 = None
     if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
         memoryId = settings["memorySettings"]["selectedMemory"]
@@ -4954,6 +5001,8 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
             tools.extend(keyboard_use_tools)
         if not settings['visionControlSettings']['desktopVision']:
             tools.extend(desktopVision_use_tools)
+    if settings.get('vision', {}).get('cameraEnabled'):
+        tools.extend(camera_use_tools)
     if settings["tools"]["randomTopic"]['enabled']:
         tools.extend(random_topics_tools)
     if settings['tools']['time']['enabled'] and settings['tools']['time']['triggerMode'] == 'afterThinking':
@@ -5073,7 +5122,12 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
             # 找出request.messages中上次的assistant回复
             for i in range(len(request.messages)-1, -1, -1):
                 if request.messages[i]['role'] == 'assistant':
-                    assistant_reply = request.messages[i]['content']
+                    assistant_reply = request.messages[i].get('content') or ""
+                    if isinstance(assistant_reply, list):
+                        assistant_reply = "".join(
+                            x.get('text', '') for x in assistant_reply
+                            if isinstance(x, dict) and x.get('type') == 'text'
+                        )
                     break
             if cur_memory["characterBook"]:
                 for lore in cur_memory["characterBook"]:
@@ -5866,6 +5920,7 @@ async def execute_tool_manually(request: Request):
         wait,
         screenshot
     )
+    from py.camera_tool import camera_capture
 
     # ==================== 2. 定义工具映射表 ====================
     _TOOL_HOOKS = {
@@ -5972,9 +6027,10 @@ async def execute_tool_manually(request: Request):
         "keyboard_hotkey":keyboard_hotkey,
         "keyboard_hold":keyboard_hold,
         "wait":wait,
-        "screenshot":screenshot
+        "screenshot":screenshot,
+        "camera_capture":camera_capture,
     }
-    
+
 
     if tool_name not in _TOOL_HOOKS:
         return {"result": f"Tool {tool_name} not found in backend registry."}
@@ -6274,7 +6330,10 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
             print("Client disconnected")
             raise
         except Exception as e:
-            return JSONResponse(status_code=500, content={"error": {"message": str(e), "type": "server_error", "code": 500}})
+            import traceback
+            tb = traceback.format_exc()
+            print("CHAT ENDPOINT ERROR:\n" + tb)
+            return JSONResponse(status_code=500, content={"error": {"message": str(e) + "\n" + tb, "type": "server_error", "code": 500}})
             
     else:
         # ===== Agent 部分逻辑 ===== 
@@ -6360,7 +6419,10 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
             print("Client disconnected")
             raise
         except Exception as e:
-            return JSONResponse(status_code=500, content={"error": {"message": str(e), "type": "server_error", "code": 500}})
+            import traceback
+            tb = traceback.format_exc()
+            print("CHAT ENDPOINT ERROR:\n" + tb)
+            return JSONResponse(status_code=500, content={"error": {"message": str(e) + "\n" + tb, "type": "server_error", "code": 500}})
 
 @app.post("/simple_chat")
 async def simple_chat_endpoint(request: ChatRequest):
@@ -8670,6 +8732,119 @@ async def stop_sql():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+class CameraCaptureRequest(BaseModel):
+    prompt: str = "请仔细描述你看到的内容，包括人物、场景、文字等所有可见信息"
+    camera_index: int = 0
+    window_title: Optional[str] = None
+    source_type: Optional[str] = None  # 'camera' | 'monitor' | 'window'
+    index: Optional[int] = None
+    hwnd: Optional[int] = None
+
+
+@app.get("/camera_snapshot")
+async def camera_snapshot_endpoint(
+    camera_index: int = 0,
+    window_title: Optional[str] = None,
+    source_type: Optional[str] = None,
+    index: Optional[int] = None,
+    hwnd: Optional[int] = None,
+):
+    """
+    一次性捕获一帧画面并直接返回 JPEG 原始字节（不经视觉模型分析）。
+    支持 source_type=camera|monitor|window；兼容旧参数 camera_index/window_title。
+    """
+    from py.camera_tool import capture_snapshot_bytes
+    from fastapi import Response
+    try:
+        data = await capture_snapshot_bytes(
+            camera_index=camera_index,
+            window_title=window_title,
+            source_type=source_type,
+            index=index,
+            hwnd=hwnd,
+        )
+        return Response(content=data, media_type="image/jpeg")
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/capture/sources")
+async def list_capture_sources_endpoint():
+    """枚举可选的捕获源（显示器 / 窗口 / 摄像头）供前端下拉。"""
+    from py.camera_tool import list_capture_sources
+    try:
+        return await list_capture_sources()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/camera_capture")
+async def camera_capture_endpoint(request: CameraCaptureRequest):
+    """
+    调用摄像头或指定窗口截图，通过视觉模型（Qwen3-VL）分析图像。
+    - camera_index: 摄像头索引，0=默认摄像头
+    - window_title: 窗口标题关键词（如 "VRChat"），优先于摄像头
+    - prompt: 视觉分析指令
+    """
+    from py.camera_tool import camera_capture
+    result = await camera_capture(
+        prompt=request.prompt,
+        camera_index=request.camera_index,
+        window_title=request.window_title,
+        source_type=request.source_type,
+        index=request.index,
+        hwnd=request.hwnd,
+    )
+    return {"result": result}
+
+
+class QwenVLStartRequest(BaseModel):
+    model_path: Optional[str] = None
+    host: str = "127.0.0.1"
+    port: int = 8000
+    served_name: str = "Qwen2.5-VL-3B"
+    extra_args: str = ""
+    command_template: Optional[str] = None
+    wait_ready: bool = False
+
+
+@app.post("/qwen_vl/start")
+async def qwen_vl_start_endpoint(request: QwenVLStartRequest):
+    """一键启动本地 Qwen VL 推理服务（vLLM）。"""
+    from py.qwen_vl_launcher import qwen_vl_launcher
+    settings = load_settings()
+    vision_cfg = settings.get("vision", {}) if isinstance(settings, dict) else {}
+    model_path = request.model_path or vision_cfg.get("qwenVlModelPath") or r"G:\\Qwen2.5-VL-3B-Instruct"
+    host = request.host or vision_cfg.get("qwenVlHost") or "127.0.0.1"
+    port = int(request.port or vision_cfg.get("qwenVlPort") or 8000)
+    served_name = request.served_name or vision_cfg.get("qwenVlServedName") or "Qwen2.5-VL-3B"
+    extra_args = request.extra_args if request.extra_args else (vision_cfg.get("qwenVlExtraArgs") or "")
+    command_template = request.command_template or vision_cfg.get("qwenVlCommandTemplate") or None
+
+    result = await qwen_vl_launcher.start(
+        model_path=model_path,
+        host=host,
+        port=port,
+        served_name=served_name,
+        extra_args=extra_args,
+        command_template=command_template,
+        wait_ready=request.wait_ready,
+    )
+    return result
+
+
+@app.post("/qwen_vl/stop")
+async def qwen_vl_stop_endpoint():
+    from py.qwen_vl_launcher import qwen_vl_launcher
+    return await qwen_vl_launcher.stop()
+
+
+@app.get("/qwen_vl/status")
+async def qwen_vl_status_endpoint(host: str = "127.0.0.1", port: int = 8000):
+    from py.qwen_vl_launcher import qwen_vl_launcher
+    return await qwen_vl_launcher.status(host=host, port=port)
 
 
 @app.post("/load_file")

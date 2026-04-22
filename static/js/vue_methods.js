@@ -1948,86 +1948,46 @@ let vue_methods = {
                 const userName = this.memorySettings?.userName || 'User';
 
                 // --- 1. 处理人类用户 (User) 的消息 ---
-                if (this.isGroupMode && msg.role === 'user') {
-                    let textContent = (msg.pure_content ?? msg.content) + (msg.fileLinks_content ?? '');
-                    // 加上名字前缀： "管理员: 你们好哇"
-                    const finalContent = `${userName}: ${textContent}`;
+                // 主聊天模型（DeepSeek 等）不吃图片：把 imageLinks 压成文字占位
+                const buildMediaNote = (msg) => {
+                    if (!msg.imageLinks || msg.imageLinks.length === 0) return '';
+                    const videoExts = ['mp4', 'webm', 'ogg', 'mov', 'avi'];
+                    const imgs = [], vids = [];
+                    msg.imageLinks.forEach(link => {
+                        const ext = (link.path || '').split('.').pop().toLowerCase();
+                        if (videoExts.includes(ext)) vids.push(link.path);
+                        else imgs.push(link.path);
+                    });
+                    const parts = [];
+                    if (imgs.length) parts.push(`[附件图片×${imgs.length}]`);
+                    if (vids.length) parts.push(`[附件视频×${vids.length}]`);
+                    return parts.length ? '\n' + parts.join(' ') : '';
+                };
 
-                    if (msg.imageLinks && msg.imageLinks.length > 0) {
-                        const contentArray = [{ type: "text", text: finalContent }];
-                        msg.imageLinks.forEach(imageLink => {
-                            const ext = imageLink.path.split('.').pop().toLowerCase();
-                            const videoExts = ['mp4', 'webm', 'ogg', 'mov', 'avi'];
-                            
-                            if (videoExts.includes(ext)) {
-                                // 让大模型知道这是视频输入
-                                contentArray.push({ type: "video_url", video_url: { url: imageLink.path } });
-                            } else {
-                                // 普通图片输入
-                                contentArray.push({ type: "image_url", image_url: { url: imageLink.path } });
-                            }
-                        });
-                        return [{ role: 'user', content: contentArray }];
-                    } else {
-                        return [{ role: 'user', content: finalContent }];
-                    }
+                if (this.isGroupMode && msg.role === 'user') {
+                    let textContent = (msg.pure_content ?? msg.content) + (msg.fileLinks_content ?? '') + buildMediaNote(msg);
+                    const finalContent = `${userName}: ${textContent}`;
+                    return [{ role: 'user', content: finalContent }];
                 }
 
                 if (this.isGroupMode && msg.role === 'assistant' && msg.agentName !== agentDisplayName) {
-                    // 如果是其他 Agent 说的，统一转换成 user 角色
-                    let textContent = (msg.pure_content ?? msg.content) + (msg.fileLinks_content ?? '');
+                    let textContent = (msg.pure_content ?? msg.content) + (msg.fileLinks_content ?? '') + buildMediaNote(msg);
                     const finalContent = `${msg.agentName}: ${textContent}`;
-
-                    if (msg.imageLinks && msg.imageLinks.length > 0) {
-                        const contentArray = [{ type: "text", text: finalContent }];
-                        msg.imageLinks.forEach(imageLink => {
-                            const ext = imageLink.path.split('.').pop().toLowerCase();
-                            const videoExts = ['mp4', 'webm', 'ogg', 'mov', 'avi'];
-                            
-                            if (videoExts.includes(ext)) {
-                                // 让大模型知道这是视频输入
-                                contentArray.push({ type: "video_url", video_url: { url: imageLink.path } });
-                            } else {
-                                // 普通图片输入
-                                contentArray.push({ type: "image_url", image_url: { url: imageLink.path } });
-                            }
-                        });
-                        return [{ role: 'user', content: contentArray }];
-                    } else {
-                        return [{ role: 'user', content: finalContent }];
-                    }
+                    return [{ role: 'user', content: finalContent }];
                 }
 
 
                 // 优先使用后端专用结构 backend_content
                 if (msg.role === 'assistant' && msg.backend_content && msg.backend_content.length > 0) {
-                    return msg.backend_content.filter(m => 
-                        (m.content && String(m.content).trim() !== '') || 
-                        (m.tool_calls && m.tool_calls.length > 0) || 
+                    return msg.backend_content.filter(m =>
+                        (m.content && String(m.content).trim() !== '') ||
+                        (m.tool_calls && m.tool_calls.length > 0) ||
                         m.role === 'tool'
                     );
                 }
                 let apiRole = msg.role === 'system' ? 'system' : (msg.role === 'assistant' ? 'assistant' : 'user');
-                let textContent = (msg.pure_content ?? msg.content) + (msg.fileLinks_content ?? '');
-                
-                if (msg.imageLinks && msg.imageLinks.length > 0) {
-                    const contentArray = [{ type: "text", text: textContent }];
-                    msg.imageLinks.forEach(imageLink => {
-                        const ext = imageLink.path.split('.').pop().toLowerCase();
-                        const videoExts = ['mp4', 'webm', 'ogg', 'mov', 'avi'];
-                        
-                        if (videoExts.includes(ext)) {
-                            // 让大模型知道这是视频输入
-                            contentArray.push({ type: "video_url", video_url: { url: imageLink.path } });
-                        } else {
-                            // 普通图片输入
-                            contentArray.push({ type: "image_url", image_url: { url: imageLink.path } });
-                        }
-                    });
-                    return [{ role: apiRole, content: contentArray }];
-                } else {
-                    return [{ role: apiRole, content: textContent }];
-                }
+                let textContent = (msg.pure_content ?? msg.content) + (msg.fileLinks_content ?? '') + buildMediaNote(msg);
+                return [{ role: apiRole, content: textContent }];
             });
 
             // ID 修复逻辑 (保持原样 + 补充兜底防止 missing field id)
@@ -4099,6 +4059,99 @@ let vue_methods = {
     handleVisionProviderVisibleChange(visible) {
       if (!visible) {
         this.selectVisionProvider(this.visionSettings.selectedProvider);
+      }
+    },
+    async selectCameraProvider(providerId) {
+      const provider = this.modelProviders.find(p => p.id === providerId);
+      if (provider) {
+        this.visionSettings.cameraModel = provider.modelId;
+        this.visionSettings.cameraBaseUrl = provider.url;
+        this.visionSettings.cameraApiKey = provider.apiKey;
+        await this.autoSaveSettings();
+      }
+    },
+    handleCameraProviderVisibleChange(visible) {
+      if (!visible) {
+        this.selectCameraProvider(this.visionSettings.cameraSelectedProvider);
+      }
+    },
+    // ========== 本地 Qwen VL 一键启动 ==========
+    async refreshQwenVlStatus() {
+      try {
+        const host = this.visionSettings?.qwenVlHost || '127.0.0.1';
+        const port = this.visionSettings?.qwenVlPort || 8000;
+        const resp = await fetch(`/qwen_vl/status?host=${encodeURIComponent(host)}&port=${port}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        this.qwenVlStatus = data || this.qwenVlStatus;
+      } catch (e) {
+        // 静默失败，状态保持原样
+      }
+    },
+    startQwenVlPoll() {
+      if (this.qwenVlPollTimer) return;
+      this.qwenVlPollTimer = setInterval(() => this.refreshQwenVlStatus(), 3000);
+    },
+    stopQwenVlPoll() {
+      if (this.qwenVlPollTimer) {
+        clearInterval(this.qwenVlPollTimer);
+        this.qwenVlPollTimer = null;
+      }
+    },
+    async toggleQwenVl() {
+      if (this.qwenVlBusy) return;
+      this.qwenVlBusy = true;
+      try {
+        await this.refreshQwenVlStatus();
+        if (this.qwenVlStatus.running) {
+          // 停
+          const resp = await fetch('/qwen_vl/stop', { method: 'POST' });
+          const data = await resp.json();
+          if (!data.ok) throw new Error(data.error || 'stop failed');
+          try { this.$message && this.$message.success(this.t('qwenVlStopped') || '已停止 Qwen VL'); } catch {}
+          this.visionSettings.qwenVlEnabled = false;
+          this.stopQwenVlPoll();
+        } else {
+          // 启
+          const payload = {
+            model_path: this.visionSettings.qwenVlModelPath,
+            host: this.visionSettings.qwenVlHost || '127.0.0.1',
+            port: parseInt(this.visionSettings.qwenVlPort) || 8000,
+            served_name: this.visionSettings.qwenVlServedName || 'Qwen2.5-VL-3B',
+            extra_args: this.visionSettings.qwenVlExtraArgs || '',
+            command_template: this.visionSettings.qwenVlCommandTemplate || null,
+            wait_ready: false,
+          };
+          const resp = await fetch('/qwen_vl/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json();
+          if (!data.ok) throw new Error(data.error || 'start failed');
+          this.visionSettings.qwenVlEnabled = true;
+          // 自动把 API 填到视觉配置（主视觉 + 摄像头视觉）
+          if (this.visionSettings.qwenVlAutoFillCamera !== false) {
+            const baseUrl = `http://${payload.host}:${payload.port}/v1`;
+            this.visionSettings.cameraBaseUrl = baseUrl;
+            this.visionSettings.cameraApiKey = 'EMPTY';
+            this.visionSettings.cameraModel = payload.served_name;
+            // 同步到主视觉模型（供主聊天的桌面截图翻译 / images_add_in_messages 使用）
+            this.visionSettings.base_url = baseUrl;
+            this.visionSettings.api_key = 'EMPTY';
+            this.visionSettings.model = payload.served_name;
+            this.visionSettings.enabled = true;
+          }
+          try { this.$message && this.$message.success(this.t('qwenVlStarting') || '已启动 Qwen VL（加载中，请稍候）'); } catch {}
+          this.startQwenVlPoll();
+        }
+        await this.autoSaveSettings();
+        await this.refreshQwenVlStatus();
+      } catch (e) {
+        console.error('Qwen VL toggle 失败:', e);
+        try { this.$message && this.$message.error(`${this.t('qwenVlFail') || 'Qwen VL 操作失败'}: ${e.message || e}`); } catch {}
+      } finally {
+        this.qwenVlBusy = false;
       }
     },
     handleBrainProviderVisibleChange(visible) {
@@ -11525,6 +11578,77 @@ stopTTSActivities() {
       window.electronAPI.windowAction('show');
     }
   },
+
+  // 摄像头快照 —— 调用后端 /camera_snapshot 拍一张，作为图片附件加入下一条消息
+  // 和截图按钮 UX 一致：拍完就挂在输入框，用户自己写文字再发送，AI会走正常的视觉管线
+  async refreshCaptureSources() {
+    if (this.captureSourcesLoading) return;
+    this.captureSourcesLoading = true;
+    try {
+      const resp = await fetch('/capture/sources');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      this.captureSources = {
+        monitors: data.monitors || [],
+        windows: data.windows || [],
+        cameras: data.cameras || [],
+      };
+    } catch (e) {
+      console.error('枚举捕获源失败:', e);
+      try { this.$message && this.$message.error(`${this.t('captureSourcesFail') || '枚举捕获源失败'}: ${e.message || e}`); } catch {}
+    } finally {
+      this.captureSourcesLoading = false;
+    }
+  },
+  async triggerCameraSnapshot() {
+    if (this.isCameraSnapshotLoading) return;
+    this.isCameraSnapshotLoading = true;
+    try {
+      const vs = this.visionSettings || {};
+      const st = vs.captureSourceType || 'camera';
+      // 构造 /camera_capture 参数：走 "视觉→文字" 流程，避免把原图直接塞给纯文本主模型
+      const payload = {
+        prompt: vs.cameraPrompt || '',
+        source_type: st,
+      };
+      if (st === 'window') {
+        if (vs.captureWindowHwnd) payload.hwnd = Number(vs.captureWindowHwnd);
+        if (vs.captureWindowTitle) payload.window_title = vs.captureWindowTitle;
+      } else if (st === 'monitor') {
+        payload.index = Number(vs.captureSourceIndex ?? 0);
+      } else {
+        payload.camera_index = Number(vs.captureSourceIndex ?? vs.cameraIndex ?? 0);
+        payload.index = payload.camera_index;
+      }
+      const resp = await fetch('/camera_capture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try { const j = await resp.json(); if (j.error || j.detail) msg = j.error || JSON.stringify(j.detail); } catch {}
+        throw new Error(msg);
+      }
+      const data = await resp.json();
+      const description = (data && data.result) ? String(data.result) : '';
+      if (!description) throw new Error('视觉模型返回空描述');
+
+      // 把视觉描述追加到用户输入框；用户可以继续补充自己的话再发送
+      const existing = this.userInput || '';
+      const sep = existing.trim() ? '\n\n' : '';
+      this.userInput = existing + sep + description;
+
+      try { this.$message && this.$message.success(this.t('cameraSnapshotOk') || '已识别画面'); } catch {}
+    } catch (e) {
+      console.error('摄像头视觉识别失败:', e);
+      const hint = (this.t && this.t('cameraSnapshotFail')) || '摄像头识别失败';
+      try { this.$message && this.$message.error(`${hint}: ${e.message || e}`); } catch {}
+    } finally {
+      this.isCameraSnapshotLoading = false;
+    }
+  },
+
   async toggleCapsuleMode() {
     this.activeMenu = 'home';
     this.isPttMode = false;

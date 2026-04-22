@@ -736,6 +736,18 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </el-button>
                     </el-tooltip>
 
+                    <el-tooltip :content="t('snapshotCamera')" placement="top">
+                      <el-button
+                        @click="triggerCameraSnapshot()"
+                        class="icon-btn vision-btn"
+                        :loading="isCameraSnapshotLoading"
+                        type="default"
+                        v-if="MoreButtonDict.find(b => b.name === 'cameraSnapshotButton')?.enabled||isCapsuleMode"
+                        circle>
+                        <i class="fa-solid fa-video"></i>
+                      </el-button>
+                    </el-tooltip>
+
                     <el-tooltip :content="t('imgGen')" placement="top">
                       <el-button
                         @click="text2imgSettings.enabled = !text2imgSettings.enabled; autoSaveSettings()"
