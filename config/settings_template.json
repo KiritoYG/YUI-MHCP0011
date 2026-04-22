@@ -126,7 +126,7 @@
       "captureWindowHwnd": null,
       "captureWindowTitle": "",
       "qwenVlEnabled": false,
-      "qwenVlModelPath": "G:\\Qwen2.5-VL-3B-Instruct",
+      "qwenVlModelPath": "",
       "qwenVlHost": "127.0.0.1",
       "qwenVlPort": 8001,
       "qwenVlServedName": "Qwen2.5-VL-3B",

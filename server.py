@@ -81,24 +81,24 @@ def force_bind_or_fallback(host, preferred_port):
         print(f"Port {preferred_port} unavailable ({reason}), auto-assigning...", 
               file=sys.stderr, flush=True)
         
-        # 关闭失败的 socket
+        # 关闭失败的 socket（best effort，失败也不重要）
         try:
             if sock:
                 sock.close()
-        except:
+        except Exception:
             pass
-        
+
         # 降级：让系统分配端口
         return auto_assign_port(host)
-        
+
     except Exception as e:
         # 捕获所有其他异常
-        print(f"Unexpected error binding port {preferred_port}: {e}, auto-assigning...", 
+        print(f"Unexpected error binding port {preferred_port}: {e}, auto-assigning...",
               file=sys.stderr, flush=True)
         try:
             if sock:
                 sock.close()
-        except:
+        except Exception:
             pass
         return auto_assign_port(host)
 
@@ -117,9 +117,9 @@ def auto_assign_port(host):
         print(f"Failed to bind {host}: {e}", file=sys.stderr, flush=True)
         try:
             sock.close()
-        except:
+        except Exception:
             pass
-    
+
     # 降级 1: 尝试 0.0.0.0 (所有接口)
     if host != "0.0.0.0":
         try:
@@ -135,9 +135,9 @@ def auto_assign_port(host):
             print(f"Failed to bind 0.0.0.0: {e}", file=sys.stderr, flush=True)
             try:
                 sock.close()
-            except:
+            except Exception:
                 pass
-    
+
     # 降级 2: 尝试 localhost
     if host != "localhost":
         try:
@@ -153,9 +153,9 @@ def auto_assign_port(host):
             print(f"Failed to bind localhost: {e}", file=sys.stderr, flush=True)
             try:
                 sock.close()
-            except:
+            except Exception:
                 pass
-    
+
     # 最后手段：硬编码高位端口（极端情况）
     fallback_ports = [45678, 45679, 45680, 0]
     for fp in fallback_ports:
@@ -167,10 +167,10 @@ def auto_assign_port(host):
             sock.close()
             print(f"Fallback to hardcoded port: {port}", file=sys.stderr, flush=True)
             return port
-        except:
+        except Exception:
             try:
                 sock.close()
-            except:
+            except Exception:
                 pass
             continue
     
@@ -856,6 +856,51 @@ async def cors_options_workaround(request: Request, call_next):
             }
         )
     return await call_next(request)
+
+
+# ----------------- 全局异常兜底 -----------------
+# 目的：
+#   1. 让前端永远收到统一格式 {error, code, type, path}，方便统一渲染错误
+#   2. 把 traceback 完整打到 stderr，避免之前出现的"500 没堆栈"调试地狱
+#   3. HTTPException（业务主动抛的）保持原状态码，仅规范化 body
+
+from fastapi.responses import JSONResponse as _JSONResponse
+
+
+def _error_payload(exc: Exception, request: Request, status_code: int) -> dict:
+    return {
+        "error": str(exc) or exc.__class__.__name__,
+        "code": status_code,
+        "type": exc.__class__.__name__,
+        "path": str(request.url.path),
+    }
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException):
+    # 业务主动抛的，detail 已经是给用户看的，原样回传
+    return _JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            "code": exc.status_code,
+            "type": "HTTPException",
+            "path": str(request.url.path),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    import traceback as _tb
+    tb = _tb.format_exc()
+    # 保留之前已经在用的 print/logger 双写习惯，方便从控制台和日志面板都能看到
+    print(f"[unhandled] {request.method} {request.url.path}\n{tb}", flush=True)
+    try:
+        logger.error(f"[unhandled] {request.method} {request.url.path}: {exc}\n{tb}")
+    except Exception:
+        pass
+    return _JSONResponse(status_code=500, content=_error_payload(exc, request, 500))
 
 async def t(text: str) -> str:
     global locales
@@ -3784,8 +3829,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     if "```json" in response_content:
                         try:
                             response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                        except:
-                            # 用re 提取```json 之后的内容
+                        except (AttributeError, ValueError):
+                            # 没匹配到闭合的 ```，退化到只取 ```json 之后的内容
                             response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
                     try:
                         response_content = json.loads(response_content)
@@ -4596,8 +4641,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         if "```json" in response_content:
                             try:
                                 response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                            except:
-                                # 用re 提取```json 之后的内容
+                            except (AttributeError, ValueError):
                                 response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
                         try:
                             response_content = json.loads(response_content)
@@ -5437,8 +5481,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
             if "```json" in response_content:
                 try:
                     response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                except:
-                    # 用re 提取```json 之后的内容
+                except (AttributeError, ValueError):
                     response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
             response_content = json.loads(response_content)
             if response_content["status"] == "done":
@@ -5666,8 +5709,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 if "```json" in response_content:
                     try:
                         response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                    except:
-                        # 用re 提取```json 之后的内容
+                    except (AttributeError, ValueError):
                         response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
                 response_content = json.loads(response_content)
                 if response_content["status"] == "done":
@@ -7393,7 +7435,8 @@ class TTSConnectionManager:
                     await connection.send_bytes(message)
                 else:
                     await connection.send_text(message)
-            except:
+            except Exception:
+                # 客户端已断开/网络抖动，标记后统一清理
                 disconnected.append(connection)
         for conn in disconnected:
             self.disconnect_vrm(conn)
@@ -7405,7 +7448,7 @@ class TTSConnectionManager:
         for connection in self.main_connections:
             try:
                 await connection.send_text(message)
-            except:
+            except Exception:
                 disconnected.append(connection)
         for conn in disconnected:
             self.disconnect_main(conn)
@@ -7452,7 +7495,7 @@ async def broadcast_to_vrm(self, message: Union[str, bytes]):
                 await connection.send_bytes(message)
             else:
                 await connection.send_text(message)
-        except:
+        except Exception:
             disconnected.append(connection)
     for conn in disconnected:
         self.disconnect_vrm(conn)
@@ -7927,13 +7970,14 @@ async def text_to_speech(request: Request):
         # 9. Faster-Qwen3-TTS (OpenAI 兼容接口)
         # ==========================================
         elif tts_engine == 'qwen3tts':
+            # faster-qwentts 默认 API 模式跑在 8000；如改了端口请到「TTS 设置」覆盖
             qwen3_server = tts_settings.get('qwen3ttsServer', 'http://127.0.0.1:8000').strip().rstrip('/')
             qwen3_voice = tts_settings.get('qwen3ttsVoice', 'alloy')
             qwen3_speed = float(tts_settings.get('qwen3ttsSpeed', 1.0))
             if mobile_optimized:
                 qwen3_speed = min(qwen3_speed * 0.95, 1.2)
 
-            qwen3_model = tts_settings.get('qwen3ttsModel', 'Qwen3-TTS-12Hz-1.7B-Base')
+            qwen3_model = tts_settings.get('qwen3ttsModel', 'Qwen/Qwen3-TTS-12Hz-1.7B-Base')
             ref_audio_path = tts_settings.get('qwen3ttsRefAudioPath', '').strip()
             ref_text = tts_settings.get('qwen3ttsRefText', '').strip()
 
@@ -7952,17 +7996,39 @@ async def text_to_speech(request: Request):
             if ref_text:
                 payload["ref_text"] = ref_text
 
+            # 调用前先做轻量探活，给出比 raw traceback 更友好的错误提示
             try:
                 resp = await global_http_client.post(url, json=payload, timeout=120)
-                resp.raise_for_status()
-                audio_bytes = resp.content
-            except Exception as e:
-                error_detail = str(e)
+            except httpx.ConnectError:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"无法连接到 Faster-Qwen3-TTS 服务 ({qwen3_server})。"
+                           f"请确认服务已启动；如端口已变更，请到「TTS 设置」修改 qwen3ttsServer。"
+                )
+            except httpx.TimeoutException:
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Faster-Qwen3-TTS 响应超时（>120s），可能模型仍在加载或显存不足"
+                )
+
+            if resp.status_code == 404:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Faster-Qwen3-TTS 端点 {url} 返回 404：服务在跑，但路径不对。"
+                           f"请确认它的 OpenAI 兼容路径是不是 /v1/audio/speech；"
+                           f"可访问 {qwen3_server}/docs 查看真实路由"
+                )
+            if resp.status_code >= 400:
+                # 尝试拿后端的 detail，拿不到就用状态码兜底
                 try:
-                    error_detail = resp.text or error_detail
+                    err_body = resp.text[:500]
                 except Exception:
-                    pass
-                raise HTTPException(status_code=502, detail=f"Faster-Qwen3-TTS 服务错误: {error_detail}")
+                    err_body = f"HTTP {resp.status_code}"
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Faster-Qwen3-TTS 服务错误 (HTTP {resp.status_code}): {err_body}"
+                )
+            audio_bytes = resp.content
 
             async def generate_audio():
                 chunk_size = 4096
@@ -8194,7 +8260,7 @@ async def get_system_voices():
                     if isinstance(raw_lang, bytes):
                         try:
                             lang = raw_lang.decode('utf-8', errors='ignore').replace('\x05', '')
-                        except:
+                        except (UnicodeDecodeError, AttributeError):
                             lang = str(raw_lang)
                     else:
                         lang = str(raw_lang)
@@ -8801,11 +8867,14 @@ async def camera_capture_endpoint(request: CameraCaptureRequest):
 
 
 class QwenVLStartRequest(BaseModel):
+    # 注意：port/host/served_name/extra_args 必须用 Optional[...] = None
+    # 否则 Pydantic 会把默认值塞进 request.port，让下面 `request.port or vision_cfg.get(...)`
+    # 短路成 hard-coded 8000，settings 永远读不到。
     model_path: Optional[str] = None
-    host: str = "127.0.0.1"
-    port: int = 8000
-    served_name: str = "Qwen2.5-VL-3B"
-    extra_args: str = ""
+    host: Optional[str] = None
+    port: Optional[int] = None
+    served_name: Optional[str] = None
+    extra_args: Optional[str] = None
     command_template: Optional[str] = None
     wait_ready: bool = False
 
@@ -8814,11 +8883,23 @@ class QwenVLStartRequest(BaseModel):
 async def qwen_vl_start_endpoint(request: QwenVLStartRequest):
     """一键启动本地 Qwen VL 推理服务（vLLM）。"""
     from py.qwen_vl_launcher import qwen_vl_launcher
-    settings = load_settings()
+    # 注意：原来这里漏 await，导致 vision_cfg 永远拿不到值、只能落到硬编码路径
+    settings = await load_settings()
     vision_cfg = settings.get("vision", {}) if isinstance(settings, dict) else {}
-    model_path = request.model_path or vision_cfg.get("qwenVlModelPath") or r"G:\\Qwen2.5-VL-3B-Instruct"
+    model_path = request.model_path or vision_cfg.get("qwenVlModelPath") or ""
+    if not model_path:
+        raise HTTPException(
+            status_code=400,
+            detail="未配置 Qwen VL 模型路径，请在前端「视觉模型」面板填入 qwenVlModelPath 后重试"
+        )
+    if not os.path.exists(model_path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Qwen VL 模型路径不存在: {model_path}"
+        )
     host = request.host or vision_cfg.get("qwenVlHost") or "127.0.0.1"
-    port = int(request.port or vision_cfg.get("qwenVlPort") or 8000)
+    # 默认 8001，避开 faster-qwentts (8000)
+    port = int(request.port or vision_cfg.get("qwenVlPort") or 8001)
     served_name = request.served_name or vision_cfg.get("qwenVlServedName") or "Qwen2.5-VL-3B"
     extra_args = request.extra_args if request.extra_args else (vision_cfg.get("qwenVlExtraArgs") or "")
     command_template = request.command_template or vision_cfg.get("qwenVlCommandTemplate") or None

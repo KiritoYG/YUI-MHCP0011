@@ -173,7 +173,7 @@ let vue_data = {
       captureWindowHwnd: null,
       captureWindowTitle: '',
       qwenVlEnabled: false,
-      qwenVlModelPath: 'G:\\Qwen2.5-VL-3B-Instruct',
+      qwenVlModelPath: '',
       qwenVlHost: '127.0.0.1',
       qwenVlPort: 8001,
       qwenVlServedName: 'Qwen2.5-VL-3B',
@@ -744,7 +744,7 @@ let vue_data = {
 
       // Faster-Qwen3-TTS
       qwen3ttsServer: 'http://127.0.0.1:8000',
-      qwen3ttsModel: 'Qwen3-TTS-12Hz-1.7B-Base',
+      qwen3ttsModel: 'Qwen/Qwen3-TTS-12Hz-1.7B-Base',
       qwen3ttsVoice: 'alloy',
       qwen3ttsSpeed: 1.0,
       qwen3ttsRefAudioPath: '',

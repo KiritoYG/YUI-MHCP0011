@@ -392,7 +392,7 @@ async def camera_capture(
     if not vision_cfg.get('enabled'):
         return (
             "[视觉工具不可用] 视觉模型未启用。请告知用户：在设置 → 视觉模型 中开启并配置 "
-            "Base URL (如 http://localhost:8000/v1)、模型名 (如 Qwen/Qwen3-VL-7B-Instruct)、"
+            "Base URL (如 http://localhost:8001/v1)、模型名 (如 Qwen/Qwen3-VL-7B-Instruct)、"
             "API Key (vLLM 填 EMPTY)。"
         )
 
@@ -441,7 +441,8 @@ async def camera_capture(
     # 调用视觉模型 —— 优先用摄像头专属配置，回退到通用 vision 配置
     try:
         api_key = vision_cfg.get('cameraApiKey') or vision_cfg.get('api_key') or 'EMPTY'
-        base_url = vision_cfg.get('cameraBaseUrl') or vision_cfg.get('base_url') or 'http://localhost:8000/v1'
+        # 默认走本地 Qwen VL 服务（8001），避免和 faster-qwentts（8000）撞端口
+        base_url = vision_cfg.get('cameraBaseUrl') or vision_cfg.get('base_url') or 'http://localhost:8001/v1'
         model = vision_cfg.get('cameraModel') or vision_cfg.get('model') or 'Qwen3-VL'
         # 视觉识别用低温度保证客观性，不跟随通用温度设置
         temperature = 0.2

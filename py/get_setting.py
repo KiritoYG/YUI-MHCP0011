@@ -336,45 +336,87 @@ def _wrap_pcm_to_wav(pcm_data):
         return pcm_data
 
 # ----------------- 7. 配置读写 -----------------
+#
+# 性能说明：
+# settings 在原实现里每次请求都从 SQLite 读 + 完整 JSON 解析 + 递归 merge，
+# 一次聊天会话会被调 20+ 次。这里加一层进程内缓存，写入时失效。
+# 失效策略：save_settings() 主动清缓存；高并发场景下用 asyncio.Lock 防止
+# 并发读取重复打数据库。
 
-async def load_settings():
-    await init_db()
-    defaults = get_default_settings_sync().copy()
-    
-    async with aiosqlite.connect(DATABASE_PATH) as db:
-        async with db.execute('SELECT data FROM settings WHERE id = 1') as cursor:
-            row = await cursor.fetchone()
-            if row:
-                try:
-                    user_settings = json.loads(row[0])
-                except Exception:
-                    user_settings = {}
-                
-                # Merge logic
-                has_changes = [False]
-                def merge_defaults(default_dict, target_dict):
-                    for key, value in default_dict.items():
-                        if key not in target_dict:
-                            target_dict[key] = value
-                            has_changes[0] = True
-                        elif isinstance(value, dict) and isinstance(target_dict.get(key), dict):
-                            merge_defaults(value, target_dict[key])
-                
-                merge_defaults(defaults, user_settings)
-                if has_changes[0]:
-                    asyncio.create_task(save_settings(user_settings))
-                return user_settings
-            else:
-                if IS_DOCKER:
-                    defaults["isdocker"] = True
-                await save_settings(defaults)
-                return defaults
+import copy as _copy
+
+_settings_cache: dict | None = None
+_settings_cache_lock = asyncio.Lock()
+
+
+def _invalidate_settings_cache():
+    """显式置空缓存，下一次 load_settings() 会重新读 DB。"""
+    global _settings_cache
+    _settings_cache = None
+
+
+async def load_settings(use_cache: bool = True):
+    """读取 settings。默认走进程内缓存；传 use_cache=False 强制刷新。
+
+    注意：返回的是缓存对象的 deep copy，避免上层就地改值污染缓存。
+    如需写回，请调用 save_settings()。
+    """
+    global _settings_cache
+
+    if use_cache and _settings_cache is not None:
+        return _copy.deepcopy(_settings_cache)
+
+    async with _settings_cache_lock:
+        # 双检锁：等锁的过程中可能已有别的协程填好了缓存
+        if use_cache and _settings_cache is not None:
+            return _copy.deepcopy(_settings_cache)
+
+        await init_db()
+        defaults = get_default_settings_sync().copy()
+
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            async with db.execute('SELECT data FROM settings WHERE id = 1') as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    try:
+                        user_settings = json.loads(row[0])
+                    except Exception as e:
+                        logging.warning(f"settings JSON 解析失败，回退到默认值: {e}")
+                        user_settings = {}
+
+                    # 把默认模板里新增的键合并进去（向前兼容老配置）
+                    has_changes = [False]
+
+                    def merge_defaults(default_dict, target_dict):
+                        for key, value in default_dict.items():
+                            if key not in target_dict:
+                                target_dict[key] = value
+                                has_changes[0] = True
+                            elif isinstance(value, dict) and isinstance(target_dict.get(key), dict):
+                                merge_defaults(value, target_dict[key])
+
+                    merge_defaults(defaults, user_settings)
+                    if has_changes[0]:
+                        asyncio.create_task(save_settings(user_settings))
+
+                    _settings_cache = user_settings
+                    return _copy.deepcopy(user_settings)
+                else:
+                    if IS_DOCKER:
+                        defaults["isdocker"] = True
+                    await save_settings(defaults)
+                    _settings_cache = defaults
+                    return _copy.deepcopy(defaults)
+
 
 async def save_settings(settings):
+    global _settings_cache
     data = json.dumps(settings, ensure_ascii=False, indent=2)
     async with aiosqlite.connect(DATABASE_PATH) as db:
         await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
         await db.commit()
+    # 写入后刷新缓存（直接放入新值，避免下次读还要打 DB）
+    _settings_cache = _copy.deepcopy(settings)
 
 async def load_covs():
     try:
